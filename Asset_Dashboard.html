@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Asset Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <style>
+        :root {
+            --primary: #0f172a;
+            --accent: #2563eb;
+            --success: #059669;
+            --danger: #dc2626;
+            --bg: #f1f5f9;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); color: var(--primary); }
+
+        .header {
+            background: linear-gradient(90deg, #0f172a 0%, #1e293b 100%);
+            color: white; padding: 20px; position: sticky; top: 0; 
+            z-index: 2000;
+            display: flex; justify-content: space-between; align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .controls-section {
+            display: grid; grid-template-columns: 2fr 1fr; gap: 15px; margin: 25px 0;
+        }
+        .search-input, .filter-select {
+            border: 2px solid transparent; background: white; padding: 14px 20px;
+            border-radius: 16px; font-size: 15px; font-weight: 500;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.05); outline: none;
+        }
+
+        .kpi-container { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 30px; }
+        .kpi-card { background: white; padding: 20px; border-radius: 20px; border: 1px solid #e2e8f0; }
+        .kpi-label { font-size: 11px; font-weight: 800; color: #64748b; text-transform: uppercase; }
+        .kpi-value { font-size: 22px; font-weight: 800; margin-top: 5px; }
+
+        .main-card { background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.05); }
+        .table-responsive { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 800px; }
+        th { background: #f8fafc; padding: 18px; text-align: left; font-size: 12px; font-weight: 700; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; }
+        td { padding: 18px; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
+
+        .project-row { cursor: pointer; transition: 0.2s; }
+        .project-row:hover { background: #f0f7ff !important; color: var(--accent); }
+
+        .modal {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(8px); 
+            z-index: 3000;
+        }
+        .modal-content {
+            background: white; width: 95%; max-width: 1100px; height: 85vh;
+            margin: 5vh auto; border-radius: 30px; display: flex; flex-direction: column;
+            overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+        }
+        .modal-header { padding: 25px 30px; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; }
+        
+        .modal-controls { 
+            display: grid; grid-template-columns: 2fr 1fr; gap: 15px; 
+            padding: 15px 30px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+        }
+
+        .modal-body { flex: 1; overflow-y: auto; padding: 0 30px; }
+        .modal-total-bar { background: #f8fafc; padding: 20px 30px; display: flex; justify-content: space-between; border-top: 1px solid #e2e8f0; }
+
+        /* Status Colors Formatting */
+        .pill { padding: 6px 14px; border-radius: 10px; font-size: 11px; font-weight: 800; text-transform: uppercase; display: inline-block; }
+        .status-excess { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .status-short { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .status-matched { background: #e0f2fe; color: #075985; border: 1px solid #bae6fd; }
+        .status-default { background: #f1f5f9; color: #475569; }
+
+        #loader { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 4000; background: white; padding: 20px 40px; border-radius: 20px; font-weight: 800; box-shadow: 0 20px 50px rgba(0,0,0,0.2); }
+    </style>
+</head>
+<body>
+
+<div id="loader">SYNCING DATA...</div>
+
+<div class="header">
+    <h1 style="letter-spacing: -1px;">Asset Dashboard</h1>
+    <button onclick="fetchData()" style="padding:10px 24px; background:var(--accent); color:white; border:none; border-radius:12px; cursor:pointer; font-weight:700;">Refresh</button>
+</div>
+
+<div class="main" style="padding: 20px; max-width: 1400px; margin: auto;">
+    <div class="controls-section">
+        <input type="text" id="masterSearch" class="search-input" placeholder="🔍 Search Projects..." onkeyup="filterHub()">
+        <select id="statusFilter" class="filter-select" onchange="filterHub()">
+            <option value="ALL">All Status</option>
+        </select>
+    </div>
+
+    <div class="kpi-container">
+        <div class="kpi-card"><div class="kpi-label">Entries</div><div id="k-items" class="kpi-value">0</div></div>
+        <div class="kpi-card"><div class="kpi-label">System Value</div><div id="k-sys" class="kpi-value">0</div></div>
+        <div class="kpi-card"><div class="kpi-label">Physical Count</div><div id="k-phy" class="kpi-value">0</div></div>
+        <div class="kpi-card"><div class="kpi-label">Net Variance</div><div id="k-var" class="kpi-value">0</div></div>
+    </div>
+
+    <div class="main-card">
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Project Entity</th>
+                        <th>System</th>
+                        <th>Physical</th>
+                        <th>Var</th>
+                        <th>Value (₹)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="hubBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div id="detailModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTitle" style="font-weight: 800;">Project View</h2>
+            <span style="font-size:30px; cursor:pointer; color:#94a3b8;" onclick="closeModal()">&times;</span>
+        </div>
+        
+        <div class="modal-controls">
+            <input type="text" id="modalSearch" class="search-input" style="border: 1px solid #ddd; box-shadow:none;" placeholder="Search item in project..." onkeyup="filterModal()">
+            <select id="modalStatusFilter" class="filter-select" style="border: 1px solid #ddd; box-shadow:none;" onchange="filterModal()">
+                <option value="ALL">All Remarks</option>
+            </select>
+        </div>
+
+        <div class="modal-body">
+            <table>
+                <thead style="position: sticky; top: 0; background: white; z-index: 10;">
+                    <tr><th>Item</th><th>Unit</th><th>Sys</th><th>Phy</th><th>Var</th><th>Value</th><th>Remarks</th></tr>
+                </thead>
+                <tbody id="modalBody"></tbody>
+            </table>
+        </div>
+        
+        <div class="modal-total-bar" id="modalStats"></div>
+    </div>
+</div>
+
+<script>
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSwKuw7VACCaoCWn-ezVDu6Z_h9Z6gqVwpGZr62G2vELNjqL5bDwVmUg3UulHioqS7Mjqq1GusU2jT-/pub?gid=275591446&single=true&output=csv';
+    let db = [];
+    let currentProjectData = [];
+
+    async function fetchData() {
+        document.getElementById('loader').style.display = 'block';
+        Papa.parse(CSV_URL, {
+            download: true, header: true,
+            complete: function(res) {
+                db = res.data.filter(r => r['Warehouse / Project']);
+                loadMainFilters();
+                filterHub();
+                document.getElementById('loader').style.display = 'none';
+            }
+        });
+    }
+
+    function loadMainFilters() {
+        const select = document.getElementById('statusFilter');
+        const remarks = [...new Set(db.map(r => r['Remarks']?.trim()))].filter(s => s);
+        select.innerHTML = '<option value="ALL">All Status</option>';
+        remarks.forEach(s => select.innerHTML += `<option value="${s}">${s}</option>`);
+    }
+
+    function getStatusClass(remark) {
+        if (!remark) return 'status-default';
+        const r = remark.toUpperCase();
+        if (r.includes('EXCESS')) return 'status-excess';
+        if (r.includes('SHORT')) return 'status-short';
+        if (r.includes('MATCHED')) return 'status-matched';
+        return 'status-default';
+    }
+
+    function filterHub() {
+        const q = document.getElementById('masterSearch').value.toUpperCase();
+        const s = document.getElementById('statusFilter').value;
+        const filtered = db.filter(r => {
+            const mQ = r['Warehouse / Project'].toUpperCase().includes(q);
+            const mS = (s === "ALL") || (r['Remarks']?.trim() === s);
+            return mQ && mS;
+        });
+        renderMainTable(filtered);
+    }
+
+    function renderMainTable(data) {
+        const projects = {};
+        let ts=0, tp=0, tv=0;
+
+        data.forEach(r => {
+            const n = r['Warehouse / Project'].trim();
+            if (!projects[n]) projects[n] = { s:0, p:0, v:0, val:0, rem: "" };
+            const s = parseFloat(r['System Stock']) || 0;
+            const p = parseFloat(r['Physical Stock']) || 0;
+            const v = parseFloat(r['Variance Value']) || 0;
+            projects[n].s += s; projects[n].p += p; projects[n].val += v; projects[n].rem = r['Remarks'];
+            ts += s; tp += p; tv += v;
+        });
+
+        const body = document.getElementById('hubBody');
+        body.innerHTML = "";
+        Object.keys(projects).forEach(n => {
+            const p = projects[n];
+            body.innerHTML += `<tr class="project-row" onclick="openModal('${n}')">
+                <td><strong>${n}</strong></td><td>${p.s}</td><td>${p.p}</td>
+                <td>${p.s - p.p}</td><td>${Math.round(p.val).toLocaleString('en-IN')}</td>
+                <td><span class="pill ${getStatusClass(p.rem)}">${p.rem}</span></td>
+            </tr>`;
+        });
+        
+        document.getElementById('k-items').innerText = data.length;
+        document.getElementById('k-sys').innerText = ts.toLocaleString();
+        document.getElementById('k-phy').innerText = tp.toLocaleString();
+        document.getElementById('k-var').innerText = '₹' + Math.round(tv).toLocaleString('en-IN');
+    }
+
+    function openModal(name) {
+        currentProjectData = db.filter(r => r['Warehouse / Project'].trim() === name);
+        document.getElementById('modalTitle').innerText = name;
+        
+        const mFilter = document.getElementById('modalStatusFilter');
+        const mRemarks = [...new Set(currentProjectData.map(r => r['Remarks']?.trim()))].filter(s => s);
+        mFilter.innerHTML = '<option value="ALL">All Remarks</option>';
+        mRemarks.forEach(s => mFilter.innerHTML += `<option value="${s}">${s}</option>`);
+
+        filterModal();
+        document.getElementById('detailModal').style.display = "block";
+        document.body.style.overflow = "hidden";
+    }
+
+    function filterModal() {
+        const q = document.getElementById('modalSearch').value.toUpperCase();
+        const s = document.getElementById('modalStatusFilter').value;
+        const filtered = currentProjectData.filter(i => {
+            const mQ = i['Item'].toUpperCase().includes(q);
+            const mS = (s === "ALL") || (i['Remarks']?.trim() === s);
+            return mQ && mS;
+        });
+        renderModalTable(filtered);
+    }
+
+    function renderModalTable(items) {
+        const body = document.getElementById('modalBody');
+        body.innerHTML = "";
+        let sT=0, pT=0, vT=0;
+
+        items.forEach(r => {
+            const s = parseFloat(r['System Stock']) || 0;
+            const p = parseFloat(r['Physical Stock']) || 0;
+            const v = parseFloat(r['Variance Value']) || 0;
+            sT += s; pT += p; vT += v;
+            body.innerHTML += `<tr>
+                <td><strong>${r['Item']}</strong></td><td>${r['Unit']}</td>
+                <td>${s}</td><td>${p}</td><td>${parseFloat(r['Variance']) || 0}</td>
+                <td>${Math.round(v).toLocaleString('en-IN')}</td>
+                <td><span class="pill ${getStatusClass(r['Remarks'])}">${r['Remarks']}</span></td>
+            </tr>`;
+        });
+
+        document.getElementById('modalStats').innerHTML = `
+            <span>Items: <b>${items.length}</b></span>
+            <span>Sys Total: <b>${sT}</b></span>
+            <span>Value: <b style="color:var(--success)">₹${Math.round(vT).toLocaleString('en-IN')}</b></span>
+        `;
+    }
+
+    function closeModal() { document.getElementById('detailModal').style.display = "none"; document.body.style.overflow = "auto"; }
+    fetchData();
+</script>
+</body>
+</html>
